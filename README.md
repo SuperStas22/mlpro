@@ -19,18 +19,18 @@
 ```  
 ```  
 # 2. Compose: сервис + Postgres, запрос к модели и SELECT из таблицы логов        
-    docker compose up -d --build --wait \        
-      && curl -s -X POST http://127.0.0.1:8000/v1/predict -H 'Content-Type: application/json' -d @good.json && echo \        
-      && sleep 1 && docker compose exec db psql -U postgres -d logp -c "SELECT request_id, ts, model_version, prediction, latency_ms, status_code FROM predictions ORDER BY ts DESC LIMIT 5"        
+    docker compose up -d --build --wait \
+  && curl -s -X POST http://127.0.0.1:8000/v1/predict -H 'Content-Type: application/json' -d @good.json && echo \
+  && sleep 1 && docker compose exec db psql -U postgres -d logp -c "SELECT request_id, ts, model_version, prediction, latency_ms, status_code FROM predictions ORDER BY ts DESC LIMIT 5"     
 ```  
 ```  
 # 3. kind: кластер, образ, манифесты, rollout, ответ модели через port-forward        
-    (kind get clusters | grep -qx logp || kind create cluster --name logp) && kubectl config use-context kind-logp \        
-      && docker build -t logp-service:1.0 . && kind load docker-image logp-service:1.0 --name logp \        
-      && kubectl apply -f k8s/ && kubectl rollout status deploy/logp-service --timeout=180s \        
-      && kubectl get deploy,pods -l app=logp \        
-      && { kubectl port-forward svc/logp-service 8080:80 >/dev/null & PF=$!; sleep 3; \        
-           curl -s -X POST http://127.0.0.1:8080/v1/predict -H 'Content-Type: application/json' -d @good.json; echo; kill $PF; }        
+     kind create cluster --name logp) && kubectl config use-context kind-logp \
+  && docker build -t logp-service:1.0 . && kind load docker-image logp-service:1.0 --name logp \
+  && kubectl apply -f k8s/ && kubectl rollout status deploy/logp-service --timeout=180s \
+  && kubectl get deploy,pods -l app=logp \
+  && { kubectl port-forward svc/logp-service 8080:80 >/dev/null & PF=$!; sleep 3; \
+       curl -s -X POST http://127.0.0.1:8080/v1/predict -H 'Content-Type: application/json' -d @good.json; echo; kill $PF; }     
 ```  
     3 команду помог доофрмить чатгпт, потому что я мудрил с отступами  и получалось запустить только отдельными командами (в целом работает и без sleep, но я оставил)  
    
