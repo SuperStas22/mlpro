@@ -13,7 +13,6 @@ GOOD = json.loads((Path(__file__).parent / "good.json").read_text())
 
 
 def molecule() -> dict:
-    # немного шевелим ибупрофен, чтобы запросы не были одинаковыми, но оставались в границах схемы
     row = dict(GOOD)
     row["MolWt"] = round(GOOD["MolWt"] * random.uniform(0.8, 1.5), 3)
     row["TPSA"] = round(random.uniform(0, 120), 2)

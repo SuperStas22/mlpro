@@ -1,13 +1,7 @@
-import json
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
-from logp import db
 from logp.service.app import app
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="session")
@@ -19,25 +13,19 @@ def client():
 @pytest.fixture()
 def good_row():
     # ибупрофен, экспериментальный logP 3.97
-    return json.loads((ROOT / "good.json").read_text())
-
-
-@pytest.fixture()
-def saved(monkeypatch):
-    """Подменяет запись в Postgres и собирает строки, которые сервис пытался залогировать."""
-    rows = []
-
-    def fake_save(request_id, features, prediction, model_version, latency_ms, status_code):
-        rows.append(
-            {
-                "request_id": request_id,
-                "features": features,
-                "prediction": prediction,
-                "model_version": model_version,
-                "latency_ms": latency_ms,
-                "status_code": status_code,
-            }
-        )
-
-    monkeypatch.setattr(db, "save_prediction", fake_save)
-    return rows
+    return {
+        "MolWt": 206.285,
+        "HeavyAtomCount": 15,
+        "NumHeteroatoms": 2,
+        "fr_halogen": 0,
+        "NumHDonors": 1,
+        "NumHAcceptors": 1,
+        "TPSA": 37.3,
+        "MolMR": 61.0348,
+        "NumRotatableBonds": 4,
+        "RingCount": 1,
+        "NumAromaticRings": 1,
+        "FractionCSP3": 0.4615,
+        "MaxPartialCharge": 0.3102,
+        "MinPartialCharge": -0.4808,
+    }

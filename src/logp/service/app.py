@@ -16,7 +16,7 @@ from logp.config import settings
 
 PREDICT_PATH = "/v1/predict"
 
-# ибупрофен (эксперимент logP 3.97): пример для /docs, тот же, что в good.json
+## ибупрофен 
 EXAMPLE = {
     "MolWt": 206.285,
     "HeavyAtomCount": 15,
@@ -35,8 +35,7 @@ EXAMPLE = {
 }
 
 
-class Features(BaseModel):
-    """RDKit-дескрипторы одной молекулы. Границы взяты с запасом относительно обучающих данных (14 тыс. молекул)."""
+class Features(BaseModel): ## пока делал, сам забыл что есть что - наверное по хорошему, на вход в дальнейшем надо подавть молекулу, а не её дескрипторы, там логичнее
 
     model_config = {"extra": "forbid", "json_schema_extra": {"examples": [EXAMPLE]}}
 
@@ -47,17 +46,16 @@ class Features(BaseModel):
     NumHDonors: int = Field(ge=0, le=50, description="доноры водородной связи")
     NumHAcceptors: int = Field(ge=0, le=100, description="акцепторы водородной связи")
     TPSA: float = Field(ge=0, le=1000, description="топологическая полярная площадь поверхности, Å²")
-    MolMR: float = Field(ge=0, le=1000, description="молярная рефракция (Crippen)")
+    MolMR: float = Field(ge=0, le=1000, description="молярная рефракция (Crippen)") ## я даже не знаю, что это....
     NumRotatableBonds: int = Field(ge=0, le=200)
     RingCount: int = Field(ge=0, le=50)
     NumAromaticRings: int = Field(ge=0, le=50)
     FractionCSP3: float = Field(ge=0, le=1, description="доля sp3-атомов углерода")
-    # для As, Se, I(III) и т.п. у Гастайгера нет параметров, RDKit отдаёт NaN: в обучающих данных такие строки есть
     MaxPartialCharge: float | None = Field(default=None, ge=-1, le=1, description="макс. заряд Гастайгера")
     MinPartialCharge: float | None = Field(default=None, ge=-1, le=1, description="мин. заряд Гастайгера")
 
-    @model_validator(mode="after")
-    def consistent(self):
+    @model_validator(mode="after") ## это пока передаем фичи, а не молеклу 
+    def consistent(self): 
         if self.NumAromaticRings > self.RingCount:
             raise ValueError("NumAromaticRings больше RingCount")
         if not self.fr_halogen <= self.NumHeteroatoms <= self.HeavyAtomCount:
@@ -114,7 +112,6 @@ app = FastAPI(
 
 
 def predict_frame(rows: list[dict]) -> list[float]:
-    # порядок колонок берём из паспорта, None в опциональных полях превращается в NaN
     frame = pd.DataFrame(rows).reindex(columns=app.state.meta["features"]).astype("float64")
     return [float(v) for v in app.state.pipeline.predict(frame)]
 
