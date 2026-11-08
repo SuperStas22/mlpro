@@ -1,0 +1,5 @@
+deployment.apps/logp-service 
+REVISION  CHANGE-CAUSE
+2         1.1: app_version в /health
+3         1.0: базовая версия
+

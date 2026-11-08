@@ -1,0 +1,11 @@
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.env
+data/
+/run*_stats*.csv
+/run*_failures.csv
+/run*_exceptions.csv

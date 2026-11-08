@@ -1,0 +1,44 @@
+[project]
+name = "logp-service"
+version = "1.0.0"
+description = "ML PRO, HW 1"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "pandas",
+    "scikit-learn==1.6.1",
+    "joblib",
+    "psycopg[binary]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx",
+    "locust",
+    "ruff",
+    "ipykernel",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "logp"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# starlette советует httpx2 вместо httpx, на работу TestClient это не влияет
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
+
+[tool.ruff]
+line-length = 140
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

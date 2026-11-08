@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logp-service
+  labels:
+    app: logp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: logp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # старый под гасим только после того, как новый прошёл readiness
+  template:
+    metadata:
+      labels:
+        app: logp
+    spec:
+      containers:
+        - name: api
+          image: logp-service:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: {name: logp-config}
+            # DATABASE_URL, если нужна база; без секрета сервис работает и просто не логирует
+            - secretRef: {name: logp-secrets, optional: true}
+          lifecycle:
+            preStop:
+              sleep: {seconds: 5}
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /ready, port: 8000}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}

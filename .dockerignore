@@ -1,0 +1,15 @@
+.venv/
+.git/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.env
+data/
+docs/
+notebooks/
+k8s/
+tests/
+scripts/
+locustfile.py
+*.csv

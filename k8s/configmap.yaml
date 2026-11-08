@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logp-config
+  labels:
+    app: logp
+data:
+  LOG_LEVEL: "INFO"
+  MODEL_PATH: artifact/model.joblib
