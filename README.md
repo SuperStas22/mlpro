@@ -25,7 +25,7 @@
 ```  
 ```  
 # 3. kind: кластер, образ, манифесты, rollout, ответ модели через port-forward        
-     kind create cluster --name logp) && kubectl config use-context kind-logp \
+     kind create cluster --name logp && kubectl config use-context kind-logp \
   && docker build -t logp-service:1.0 . && kind load docker-image logp-service:1.0 --name logp \
   && kubectl apply -f k8s/ && kubectl rollout status deploy/logp-service --timeout=180s \
   && kubectl get deploy,pods -l app=logp \
