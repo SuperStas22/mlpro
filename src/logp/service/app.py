@@ -131,7 +131,12 @@ async def validation_error(request: Request, exc: RequestValidationError):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_version": getattr(app.state, "version", "unknown"), "app_version": settings.app_version}
+    return {
+        "status": "ok",
+        "model_version": getattr(app.state, "version", "unknown"),
+        "app_version": settings.app_version,
+        "log_level": settings.log_level,
+    }
 
 
 @app.get("/ready")
