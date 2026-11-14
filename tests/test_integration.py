@@ -26,7 +26,7 @@ def test_prediction_is_logged(client, good_row):
     assert row is not None
     assert row[0] == body["model_version"]
     assert row[1] == pytest.approx(body["logp"])
-    assert row[2] == 201
+    assert row[2] == 200
     assert float(row[3]) == good_row["MolWt"]
 
 
