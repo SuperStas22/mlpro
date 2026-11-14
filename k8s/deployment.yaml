@@ -27,7 +27,7 @@ spec:
             - containerPort: 8000
           envFrom:
             - configMapRef: {name: logp-config}
-            - secretRef: {name: logp-secrets}
+            - secretRef: {name: logp-secret-missing}
           lifecycle:
             preStop:
               sleep: {seconds: 5}
