@@ -27,8 +27,7 @@ spec:
             - containerPort: 8000
           envFrom:
             - configMapRef: {name: logp-config}
-            # DATABASE_URL, если нужна база; без секрета сервис работает и просто не логирует
-            - secretRef: {name: logp-secrets, optional: true}
+            - secretRef: {name: logp-secrets}
           lifecycle:
             preStop:
               sleep: {seconds: 5}

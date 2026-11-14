@@ -50,3 +50,71 @@ jobs:
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: read, packages: read}
+
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: logp
+      - name: Load image into kind
+        run: |
+          docker pull "$IMAGE"
+          kind load docker-image "$IMAGE" --name logp
+      - name: Create application secret
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          test -n "$DB_PASSWORD"
+          kubectl create secret generic logp-secrets \
+            --from-literal=POSTGRES_PASSWORD="$DB_PASSWORD" \
+            --from-literal=DATABASE_URL="postgresql://postgres:$DB_PASSWORD@postgres:5432/logp"
+      - name: Deploy PostgreSQL
+        run: |
+          kubectl apply -f k8s/postgres.yaml
+          kubectl rollout status deployment/postgres --timeout=180s
+      - name: Deploy service
+        run: |
+          kubectl apply -f k8s/configmap.yaml -f k8s/service.yaml -f k8s/deployment.yaml
+          kubectl set image deployment/logp-service api="$IMAGE"
+          kubectl rollout status deployment/logp-service --timeout=180s
+      - name: Smoke test
+        run: |
+          kubectl port-forward service/logp-service 8080:80 > /tmp/port-forward.log 2>&1 &
+
+          curl --fail --silent --show-error --retry 10 --retry-all-errors \
+            http://localhost:8080/health | tee /tmp/health.json
+          python3 -c "import json; r=json.load(open('/tmp/health.json')); assert r['log_level'] == 'INFO', r"
+
+          curl --fail --silent --show-error -X POST http://localhost:8080/v1/predict \
+            -H "Content-Type: application/json" -d @good.json | tee /tmp/prediction.json
+          python3 -c "import json; r=json.load(open('/tmp/prediction.json')); assert -10 <= r['logp'] <= 15, r; assert isinstance(r['lipinski_ok'], bool), r"
+
+          REQUEST_ID=$(python3 -c "import json; print(json.load(open('/tmp/prediction.json'))['request_id'])")
+          sleep 2
+          kubectl exec deployment/postgres -- psql -U postgres -d logp -tAc \
+            "SELECT count(*) FROM predictions WHERE request_id = '$REQUEST_ID' AND status_code = 200" | grep -qx 1
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl describe pods || true
+          kubectl get events -A --sort-by=.lastTimestamp || true
+          kubectl logs deployment/postgres --all-containers --tail=100 || true
+          kubectl logs deployment/logp-service --all-containers --tail=100 || true
+          kubectl logs deployment/logp-service --all-containers --previous --tail=100 || true
+          cat /tmp/port-forward.log 2>/dev/null || true
