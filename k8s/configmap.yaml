@@ -6,4 +6,4 @@ metadata:
     app: logp
 data:
   LOG_LEVEL: "INFO"
-  MODEL_PATH: artifact/model.joblib
+  MODEL_PATH: artifact/missing-model.joblib
