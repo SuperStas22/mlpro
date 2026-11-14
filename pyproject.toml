@@ -19,6 +19,7 @@ dependencies = [
 dev = [
     "pytest",
     "httpx",
+    "httpx2",
     "locust",
     "ruff",
     "ipykernel",
@@ -34,8 +35,7 @@ module-name = "logp"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-# starlette советует httpx2 вместо httpx, на работу TestClient это не влияет
-filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
+markers = ["integration: нужна база данных - адрес в DATABASE_URL"]
 
 [tool.ruff]
 line-length = 140
