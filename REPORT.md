@@ -1,3 +1,54 @@
+## Отчёт по ДЗ 2: CI/CD
+
+### Чекпоинты
+
+| Пункт | Ссылка |
+|---|---|
+| Зелёный pipeline `tests -> build -> deploy` | [Actions run 43630510183](https://github.com/SuperStas22/mlpro/actions/runs/43630510183) |
+| GHCR-образ с SHA-тегами | [package `mlpro`](https://github.com/SuperStas22/mlpro/pkgs/container/mlpro), финальный тег `sha-2a8297925ad713cb97431a4c159d6d0f6d92ba28` |
+| Pull request: красный тест, затем зелёный | [PR #1](https://github.com/SuperStas22/mlpro/pull/1), [красный](https://github.com/SuperStas22/mlpro/actions/runs/43616073692), [зелёный](https://github.com/SuperStas22/mlpro/actions/runs/43616318074) |
+| Конфиг: неверный `MODEL_PATH` | [красный](https://github.com/SuperStas22/mlpro/actions/runs/43618595619), [зелёный](https://github.com/SuperStas22/mlpro/actions/runs/43626012742) |
+| Secret: неверный `secretRef` | [красный](https://github.com/SuperStas22/mlpro/actions/runs/43626437640), [зелёный](https://github.com/SuperStas22/mlpro/actions/runs/43627794053) |
+| Ресурсы: невозможный memory request | [красный](https://github.com/SuperStas22/mlpro/actions/runs/43628261838), [зелёный](https://github.com/SuperStas22/mlpro/actions/runs/43630510183) |
+
+### Три красных прогона
+
+1. **Конфиг.** Красным стал job `deploy`, шаг `Deploy service`: rollout не завершился за 180 секунд. В диагностике поды перезапускались, а в логах был FileNotFoundError для artifact/missing-model.joblib: приложение падало в lifespan при загрузке модели. Статус подов CrashLoopBackOff
+
+2. **Secret.** Красным стал job `deploy`, шаг `Deploy service`. Под был назначен на узел, но остался в CreateContainerConfigError с Restart Count: 0: контейнер не запускался. kubectl describe показал обязательный secretRef на отсутствующий logp-secret-missing
+
+3. **Ресурсы.** Красным стал job `deploy`, шаг `Deploy service`. Поды остались в Pending, Node был пустой, а PodScheduled=False. В Events scheduler напечатал 0/1 nodes are available: 1 Insufficient memory, то есть ни один узел не мог удовлетворить memory request
+
+### Ответы на семь вопросов
+
+1. В [первом build](https://github.com/SuperStas22/mlpro/actions/runs/43617157255) шёл 94 секунды, а в [следующем](https://github.com/SuperStas22/mlpro/actions/runs/43618005357) 58 секунд. Из кэша взят слой RUN uv sync --frozen --no-dev --no-install-project, потому что перед ним Dockerfile копирует только неизменившиеся pyproject.toml и uv.lock; код копируется позже и не сбрасывает кэш зависимостей
+
+2. Поды в ImagePullBackOff появляются между kubectl apply и kubectl set image: первый ReplicaSet ещё пытается запустить placeholder-образ logp-service:1.0, которого нет в registry узла. Затем set image создаёт актуальный ReplicaSet с загруженным SHA-образом, и rollout успешно завершается, поэтому старые поды не делают job красным
+
+3. Пароль задаётся в Settings -> Secrets and variables -> Actions как DB_PASSWORD. GitHub подставляет его в env шага Create application secret, kubectl create secret создаёт logp-secrets, а secretRef передаёт DATABASE_URL в env контейнера. В ConfigMap пароль класть нельзя: его значение будет обычным открытым текстом в манифесте и Git-истории
+
+4. Если убрать needs: tests, build сможет начаться параллельно с тестами. При сломанной валидации или ошибке логирования образ успеет попасть в GHCR до падения pytest, следующий deploy может выкатить заведомо непроверенный код
+
+5. На pull request выполняется только tests, потому что у build стоит if: github.ref == 'refs/heads/main'. deploy зависит от пропущенного build. Так PR быстро проверяется без публикации лишних образов и без выката неслитого кода
+
+6. pg_advisory_xact_lock(7001) сериализует инициализацию схемы на время транзакции. Без него две Kubernetes-реплики API, одновременно запущенные на пустой базе, могут одновременно выполнять DDL и создать гонку, сейчас вторая реплика ждёт коммита первой
+
+7. Порядок по жизни пода: Pending -> CreateContainerConfigError -> CrashLoopBackOff. В Pending scheduler ещё не нашёл узел, при CreateContainerConfigError узел уже назначен, но kubelet не может собрать env из Secret; в CrashLoopBackOff контейнер уже запускался, но падает, а Kubernetes увеличивает паузу между перезапусками
+
+### Звёздочки
+
+**Быстрее.** В [первом build](https://github.com/SuperStas22/mlpro/actions/runs/43617157255) job занял 94 секунды, а Docker build  77 секунд при 0% кэша. В [финальном прогоне](https://github.com/SuperStas22/mlpro/actions/runs/43630510183) job build занял 23 секунды, сама сборка  6 секунд при 44% кэша. Выигрыш дали GHA-кэш BuildKit и порядок Dockerfile: lock-файлы копируются и зависимости ставятся до копирования часто меняющегося src/
+
+**Диагностика богаче.** Шаг Diagnostics печатает поды, describe, отсортированные Events, текущие и previous-логи контейнера. Его вывода хватило, чтобы различить [падение приложения](https://github.com/SuperStas22/mlpro/actions/runs/43618595619), [отсутствующий Secret](https://github.com/SuperStas22/mlpro/actions/runs/43626437640) и [отказ scheduler](https://github.com/SuperStas22/mlpro/actions/runs/43628261838)
+
+### Журнал проблем
+
+1. После обновления зависимостей TestClient зависал на lifespan. В lock-файле оказались FastAPI 0.162.2 и Starlette 1.10.0, а Starlette предупреждала о deprecated fallback на httpx. Добавил httpx2 в dev-зависимости и обновил uv.lock, в CI все 10 тестов проходят
+
+2. Локальный integration-запуск первоначально пытался подключиться к localhost:5432, но compose-база не публиковала этот порт на host. Для локальной проверки использовал адрес контейнера, в Actions-сервисе порт явно опубликован как 5432:5432
+
+---
+
 **Отчёт по ДЗ 1**  
 **Чекпоинты базовой части**  
 **pytest**: 8 тестов, все зелёные.  
