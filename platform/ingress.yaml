@@ -1,0 +1,32 @@
+# *.localhost автоматически разрешается в 127.0.0.1, поэтому /etc/hosts менять не нужно.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mlflow
+  namespace: mlops
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: mlflow.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: mlflow, port: {number: 5000}}
+---
+# Ingress сервиса готовим заранее; backend начнёт отвечать после следующего шага деплоя.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: logp-service
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: logp.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: logp-service, port: {number: 80}}
