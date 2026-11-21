@@ -4,17 +4,20 @@
 
 | Пункт | Доказательство |
 |---|---|
-| Платформа kind + MLflow + Traefik | [`platform/up.sh`](platform/up.sh), [`platform/mlflow.yaml`](platform/mlflow.yaml), [`platform/ingress.yaml`](platform/ingress.yaml) |
-| Две версии обучающих данных в DVC | [коммит v1 `c6a94af`](https://github.com/SuperStas22/mlpro/commit/c6a94af), [коммит v2 `8723668`](https://github.com/SuperStas22/mlpro/commit/8723668), [`data/logP-14000.csv.dvc`](data/logP-14000.csv.dvc) |
-| Обучение, эксперименты и MAE-гейт | [`src/logp/train.py`](src/logp/train.py), [коммит `3e5c815`](https://github.com/SuperStas22/mlpro/commit/3e5c815) |
-| Загрузка `champion` из Registry | [`src/logp/model_store.py`](src/logp/model_store.py), [`tests/test_model_store.py`](tests/test_model_store.py), [коммит `083dab1`](https://github.com/SuperStas22/mlpro/commit/083dab1) |
+| Платформа kind + MLflow + Traefik | [`platform/up.sh`](platform/up.sh), [`platform/mlflow.yaml`](platform/mlflow.yaml), [`platform/ingress.yaml`](platform/ingress.yaml), [терминал](docs/screens/hw3-terminal-health.png) |
+| Две версии обучающих данных в DVC | [коммит v1 `c6a94af`](https://github.com/SuperStas22/mlpro/commit/c6a94af), [коммит v2 `8723668`](https://github.com/SuperStas22/mlpro/commit/8723668), [`data/logP-14000.csv.dvc`](data/logP-14000.csv.dvc), [MD5 v1](docs/screens/hw3-data-md5-v1.jpg), [MD5 v2](docs/screens/hw3-data-md5-v2.jpg) |
+| Обучение, эксперименты и MAE-гейт | [`src/logp/train.py`](src/logp/train.py), [коммит `3e5c815`](https://github.com/SuperStas22/mlpro/commit/3e5c815), [прогоны MLflow](docs/screens/hw3-mlflow-runs.jpg) |
+| Загрузка `champion` из Registry | [`src/logp/model_store.py`](src/logp/model_store.py), [`tests/test_model_store.py`](tests/test_model_store.py), [Registry](docs/screens/hw3-model-registry.jpg) |
 | CI/CD в локальный kind | [финальный зелёный run `44934815516`](https://github.com/SuperStas22/mlpro/actions/runs/44934815516), [скриншот](docs/screens/hw3-ci-success.png), [workflow](.github/workflows/ci.yml) |
+| HPA и три нагрузочных прогона | [`k8s/hpa.yaml`](k8s/hpa.yaml), [`docs/hpa-results.md`](docs/hpa-results.md) |
 
 ### 1. Локальная MLOps-платформа
 
 `platform/up.sh` идемпотентно создаёт кластер kind `logp`, устанавливает Traefik и применяет MLflow. Хранилище MLflow вынесено в PVC размером 2 GiB, поэтому эксперименты, Registry и артефакты переживают перезапуск pod. Ingress публикует UI как `http://mlflow.localhost`, а сервис модели как `http://logp.localhost`.
 
 MLflow запущен с отдельным backend store и artifact store на PVC. Доступ из приложения внутри Kubernetes идёт напрямую через Service `http://mlflow.mlops:5000`, без внешнего Ingress.
+
+![Health сервиса и две реплики в kind](docs/screens/hw3-terminal-health.png)
 
 ### 2. Версионирование данных в DVC
 
@@ -26,6 +29,10 @@ MLflow запущен с отдельным backend store и artifact store на
 | v2 | 14 163 | `281ffae6e4e238e181d19c49b8410db1` | удалены 13 неполных строк скриптом `scripts/clean_dataset.py` |
 
 Воспроизводимость проверена в отдельном чистом клоне `HW1-dvc-check`: после checkout Git-версии команда `dvc pull` восстановила соответствующий файл из remote. Тот же MD5 вычисляется при обучении и сохраняется в параметре MLflow `data_md5`, поэтому запуск однозначно связан с версией данных.
+
+![MLflow run на DVC v1](docs/screens/hw3-data-md5-v1.jpg)
+
+![MLflow run на DVC v2](docs/screens/hw3-data-md5-v2.jpg)
 
 ### 3. Эксперименты и регистрация моделей
 
@@ -47,6 +54,10 @@ MLflow запущен с отдельным backend store и artifact store на
 | v4 | DVC v1 | 20 | 0,7286 | не продвинута, `challenger` |
 
 Каждая новая версия получает алиас `challenger`. Алиас `champion` переносится только если новая MAE меньше прежней хотя бы на `GATE_MIN_GAIN=0.01`. Запас 0,01 выбран, чтобы не выкатывать модель из-за шума разбиения и улучшения в тысячных: для logP это малая, но уже различимая доля ошибки относительно MAE около 0,45. Решение сохраняется в тегах запуска `gate.promoted` и `gate.champion_before`. В финальном состоянии `champion` указывает на v3, `challenger` — на v4.
+
+![Прогоны эксперимента logp-training](docs/screens/hw3-mlflow-runs.jpg)
+
+![Версии и алиасы Model Registry](docs/screens/hw3-model-registry.jpg)
 
 ### 4. Использование Registry в сервисе
 
