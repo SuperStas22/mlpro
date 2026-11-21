@@ -8,7 +8,7 @@
 | Две версии обучающих данных в DVC | [коммит v1 `c6a94af`](https://github.com/SuperStas22/mlpro/commit/c6a94af), [коммит v2 `8723668`](https://github.com/SuperStas22/mlpro/commit/8723668), [`data/logP-14000.csv.dvc`](data/logP-14000.csv.dvc) |
 | Обучение, эксперименты и MAE-гейт | [`src/logp/train.py`](src/logp/train.py), [коммит `3e5c815`](https://github.com/SuperStas22/mlpro/commit/3e5c815) |
 | Загрузка `champion` из Registry | [`src/logp/model_store.py`](src/logp/model_store.py), [`tests/test_model_store.py`](tests/test_model_store.py), [коммит `083dab1`](https://github.com/SuperStas22/mlpro/commit/083dab1) |
-| CI/CD в локальный kind | [финальный зелёный run `44927196447`](https://github.com/SuperStas22/mlpro/actions/runs/44927196447), [скриншот](docs/screens/hw3-ci-success.png), [workflow](.github/workflows/ci.yml) |
+| CI/CD в локальный kind | [финальный зелёный run `44934815516`](https://github.com/SuperStas22/mlpro/actions/runs/44934815516), [скриншот](docs/screens/hw3-ci-success.png), [workflow](.github/workflows/ci.yml) |
 
 ### 1. Локальная MLOps-платформа
 
@@ -75,7 +75,7 @@ Deploy:
 5. ждёт rollout двух реплик
 6. проверяет `/health`, контракт `/v1/predict` и появление строки именно этого запроса в PostgreSQL.
 
-Запись лога выполняется через BackgroundTask, поэтому smoke использует ограниченный polling до 20 секунд, а не фиксированный `sleep`. Финальный run [`44927196447`](https://github.com/SuperStas22/mlpro/actions/runs/44927196447) завершил `tests`, `build`, `deploy` и smoke test успешно.
+Запись лога выполняется через BackgroundTask, поэтому smoke использует ограниченный polling до 20 секунд, а не фиксированный `sleep`. Финальный run [`44934815516`](https://github.com/SuperStas22/mlpro/actions/runs/44934815516) завершил `tests`, `build`, `deploy` и smoke test успешно.
 
 ![Зелёный CI/CD ДЗ 3](docs/screens/hw3-ci-success.png)
 
@@ -109,7 +109,21 @@ Metrics Server установлен chart `metrics-server` 3.14.0 с `--kubelet-
 
 8. Git хранит код, `.dvc`-указатель с MD5 и конфигурацию remote; DVC storage хранит байты CSV. Для версии модели N нужно открыть её run в MLflow, взять `data_md5`, найти Git-коммит с таким MD5 в `.csv.dvc`, checkout этого указателя и выполнить `dvc pull`/`dvc checkout`. Полученный файл проверяется тем же MD5, поэтому восстанавливаются именно обучающие данные версии N.
 
-### 9. Журнал проблем ДЗ 3
+### 9. Три обязательных красных прогона
+
+| Поломка | Красный прогон | Зелёный после исправления |
+|---|---|---|
+| Отсутствующий alias модели | [`44932311470`](https://github.com/SuperStas22/mlpro/actions/runs/44932311470) | [`44932740245`](https://github.com/SuperStas22/mlpro/actions/runs/44932740245) |
+| Неверный `KIND_CLUSTER` | [`44932921787`](https://github.com/SuperStas22/mlpro/actions/runs/44932921787) | [`44933072957`](https://github.com/SuperStas22/mlpro/actions/runs/44933072957) |
+| Несовпадающий host Ingress | [`44934594896`](https://github.com/SuperStas22/mlpro/actions/runs/44934594896) | [`44934815516`](https://github.com/SuperStas22/mlpro/actions/runs/44934815516) |
+
+1. Для первой поломки `MODEL_ALIAS` был заменён на несуществующий `prod`. Поды падали при startup с ошибкой разрешения alias в MLflow, поэтому rollout не завершился; возврат `champion` восстановил deploy.
+
+2. Для второй поломки `KIND_CLUSTER` был заменён на `logp-missing`. Job остановился на подключении runner к kind, потому что такого кластера нет; возврат имени `logp` исправил запуск.
+
+3. Для третьей поломки Ingress принимал `logp-broken.localhost`, а smoke обращался с host `logp.localhost`. Deploy прошёл, но smoke получил ответ не от нужного маршрута Traefik; одинаковый host в Ingress и smoke вернул зелёный прогон.
+
+### 10. Журнал проблем ДЗ 3
 
 1. Новая реплика попала в CrashLoopBackOff после первого CI deploy. В kubectl logs --previous приложение завершалось на db.init() с `password authentication failed for user postgres`. Workflow обновил logp-secrets, но существующий PostgreSQL был ранее инициализирован с другим паролем: смена Secret не меняет пароль внутри уже созданной БД. Сравнение SHA-256 без вывода значений подтвердило несовпадение. GitHub Secret DB_PASSWORD синхронизирован с паролем работающего PostgreSQL, после чего повторный main-run успешно заменил обе реплики. Старые pod оставались Ready, поэтому сервис во время диагностики отвечал.
 
