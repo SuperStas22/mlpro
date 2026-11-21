@@ -29,11 +29,26 @@ helm upgrade --install traefik traefik/traefik --version 41.6.0 \
   --namespace traefik --create-namespace \
   --values platform/traefik-values.yaml --wait
 
+echo "== metrics-server"
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >/dev/null 2>&1 || true
+helm upgrade --install metrics-server metrics-server/metrics-server --version 3.14.0 \
+  --namespace kube-system --values platform/metrics-server-values.yaml --wait
+
 echo "== Ingress routes"
 kubectl apply -f platform/ingress.yaml
 
 echo "== Waiting for MLflow"
 kubectl -n mlops rollout status deployment/mlflow --timeout=5m
+
+echo "== Waiting for resource metrics"
+for attempt in $(seq 1 30); do
+  kubectl top nodes >/dev/null 2>&1 && break
+  if [ "$attempt" -eq 30 ]; then
+    echo "Ошибка: metrics-server не отдал метрики за 150 секунд" >&2
+    exit 1
+  fi
+  sleep 5
+done
 
 echo
 echo "MLflow: http://mlflow.localhost"

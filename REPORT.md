@@ -1,3 +1,121 @@
+## Отчёт по ДЗ 3: DVC, MLflow и Model Registry
+
+### Чекпоинты
+
+| Пункт | Доказательство |
+|---|---|
+| Платформа kind + MLflow + Traefik | [`platform/up.sh`](platform/up.sh), [`platform/mlflow.yaml`](platform/mlflow.yaml), [`platform/ingress.yaml`](platform/ingress.yaml) |
+| Две версии обучающих данных в DVC | [коммит v1 `c6a94af`](https://github.com/SuperStas22/mlpro/commit/c6a94af), [коммит v2 `8723668`](https://github.com/SuperStas22/mlpro/commit/8723668), [`data/logP-14000.csv.dvc`](data/logP-14000.csv.dvc) |
+| Обучение, эксперименты и MAE-гейт | [`src/logp/train.py`](src/logp/train.py), [коммит `3e5c815`](https://github.com/SuperStas22/mlpro/commit/3e5c815) |
+| Загрузка `champion` из Registry | [`src/logp/model_store.py`](src/logp/model_store.py), [`tests/test_model_store.py`](tests/test_model_store.py), [коммит `083dab1`](https://github.com/SuperStas22/mlpro/commit/083dab1) |
+| CI/CD в локальный kind | [финальный зелёный run `44927196447`](https://github.com/SuperStas22/mlpro/actions/runs/44927196447), [скриншот](docs/screens/hw3-ci-success.png), [workflow](.github/workflows/ci.yml) |
+
+### 1. Локальная MLOps-платформа
+
+`platform/up.sh` идемпотентно создаёт кластер kind `logp`, устанавливает Traefik и применяет MLflow. Хранилище MLflow вынесено в PVC размером 2 GiB, поэтому эксперименты, Registry и артефакты переживают перезапуск pod. Ingress публикует UI как `http://mlflow.localhost`, а сервис модели как `http://logp.localhost`.
+
+MLflow запущен с отдельным backend store и artifact store на PVC. Доступ из приложения внутри Kubernetes идёт напрямую через Service `http://mlflow.mlops:5000`, без внешнего Ingress.
+
+### 2. Версионирование данных в DVC
+
+Файл `data/logP-14000.csv` не хранится в Git: Git содержит маленький `.dvc`-указатель, а сами данные находятся в локальном DVC remote `../../dvc-storage`.
+
+| Версия | Строк | MD5 | Изменение |
+|---|---:|---|---|
+| v1 | 14 176 | `cdd3248b2288aad9344a518523dc316a` | исходный датасет |
+| v2 | 14 163 | `281ffae6e4e238e181d19c49b8410db1` | удалены 13 неполных строк скриптом `scripts/clean_dataset.py` |
+
+Воспроизводимость проверена в отдельном чистом клоне `HW1-dvc-check`: после checkout Git-версии команда `dvc pull` восстановила соответствующий файл из remote. Тот же MD5 вычисляется при обучении и сохраняется в параметре MLflow `data_md5`, поэтому запуск однозначно связан с версией данных.
+
+### 3. Эксперименты и регистрация моделей
+
+`python -m logp.train` проверяет контракт данных, делает детерминированный split с `random_state=42`, обучает sklearn Pipeline и записывает в эксперимент `logp-training`:
+
+- параметры модели, seed, путь и MD5 данных;
+- метрики MAE, RMSE и R²;
+- паспорт `metadata.json`;
+- график `prediction_vs_actual.png`;
+- сериализованную модель в `logp-model` Model Registry.
+
+Проведены четыре запуска:
+
+| Версия Registry | Данные | `max_iter` | MAE | Результат гейта |
+|---|---|---:|---:|---|
+| v1 | DVC v2 | 300 | 0,4601 | первый `champion` |
+| v2 | DVC v2 | 20 | 0,7369 | не продвинута |
+| v3 | DVC v2 | 500 | 0,4337 | новый `champion` |
+| v4 | DVC v1 | 20 | 0,7286 | не продвинута, `challenger` |
+
+Каждая новая версия получает алиас `challenger`. Алиас `champion` переносится только если новая MAE меньше прежней хотя бы на `GATE_MIN_GAIN=0.01`. Запас 0,01 выбран, чтобы не выкатывать модель из-за шума разбиения и улучшения в тысячных: для logP это малая, но уже различимая доля ошибки относительно MAE около 0,45. Решение сохраняется в тегах запуска `gate.promoted` и `gate.champion_before`. В финальном состоянии `champion` указывает на v3, `challenger` — на v4.
+
+### 4. Использование Registry в сервисе
+
+В Kubernetes заданы `MODEL_NAME=logp-model`, `MODEL_ALIAS=champion` и адрес MLflow. При старте `model_store.py` сначала разрешает алиас в конкретную Model Version, а затем загружает модель и паспорт по зафиксированным номеру версии и `run_id`. Поэтому перемещение алиаса во время загрузки не может смешать модель одной версии с метаданными другой.
+
+Endpoint `/health` показывает фактически загруженную версию, например `logp-model-v3`. Перемещение алиаса само по себе не меняет уже работающий процесс: для применения новой версии выполняется rollout deployment. При автономном запуске без `MODEL_NAME` сохранён fallback на локальный joblib из ДЗ 1.
+
+Тесты `tests/test_model_store.py` проверяют разрешение алиаса, загрузку конкретной версии и локальный fallback.
+
+### 5. Проверка отката
+
+Для контролируемого отката алиас `champion` был перемещён с v3 на v1, после чего выполнен restart deployment. Новые pod загрузили v1, а `/health` вернул `logp-model-v1`. Измеренное время от переключения до готового rollout составило 13,445 секунды. Затем алиас возвращён на v3 и повторный rollout подтвердил `logp-model-v3`.
+
+Это разделяет выпуск модели и образа приложения: для отката модели не требуется собирать новый Docker-образ, достаточно вернуть алиас и перезапустить реплики.
+
+### 6. CI/CD
+
+После tests job build публикует неизменяемый образ. Job deploy выполняется на self-hosted runner с меткой kind, потому что только он имеет доступ к локальному Docker daemon и кластеру kind.
+
+Deploy:
+
+1. экспортирует kubeconfig существующего кластера
+2. скачивает SHA-образ из GHCR и загружает его в kind
+3. создаёт Kubernetes Secret из GitHub Secret DB_PASSWORD
+4. применяет PostgreSQL и манифесты сервиса
+5. ждёт rollout двух реплик
+6. проверяет `/health`, контракт `/v1/predict` и появление строки именно этого запроса в PostgreSQL.
+
+Запись лога выполняется через BackgroundTask, поэтому smoke использует ограниченный polling до 20 секунд, а не фиксированный `sleep`. Финальный run [`44927196447`](https://github.com/SuperStas22/mlpro/actions/runs/44927196447) завершил `tests`, `build`, `deploy` и smoke test успешно.
+
+![Зелёный CI/CD ДЗ 3](docs/screens/hw3-ci-success.png)
+
+### 7. HPA и нагрузка
+
+Metrics Server установлен chart `metrics-server` 3.14.0 с `--kubelet-insecure-tls`, необходимым для самоподписанного kubelet-сертификата kind. HPA держит от 2 до 6 реплик и целится в 60% CPU от request 100m.
+
+| Пользователи | Максимум реплик | p95 `/v1/predict` | Максимум CPU/pod | Ошибки |
+|---:|---:|---:|---:|---:|
+| 5 | 4 | 14 мс | 176m | 0% |
+| 10 | 6 | 14 мс | 206m | 0% |
+| 20 | 6 | 800 мс | 477m | 1,09% POST |
+
+События `SuccessfulRescale` зафиксировали рост сначала до 4, затем до 6 реплик. После остановки нагрузки CPU упал до 2%, но возврат с 6 до 2 произошёл примерно через 5 минут 50 секунд из-за окна стабилизации scale-down. Пиковая память составила 218Mi; request увеличен с 256Mi до 320Mi, то есть до пика плюс примерно треть запаса. Полный протокол: [`docs/hpa-results.md`](docs/hpa-results.md).
+
+### 8. Ответы на восемь вопросов
+
+1. `tests` и `build` не требуют доступа к домашней сети, поэтому выполняются на изолированных GitHub-hosted runner. Локальный kind находится за NAT и недоступен входящему соединению из GitHub; альтернативы — публичный API Kubernetes, VPN/tunnel или GitOps-агент внутри сети. Self-hosted runner выбран потому, что сам устанавливает исходящее соединение с GitHub и уже находится рядом с кластером.
+
+2. `--network kind` даёт runner DNS и сетевой путь до `logp-control-plane`; без него smoke и внутренний kubeconfig не достигнут узел. Docker socket нужен для `docker pull`, `kind load` и управления контейнером kind. `--group-add 0` добавляет процесс runner в группу сокета с GID 0; без этого Docker CLI получает `permission denied`.
+
+3. Обычный `kubectl create secret` работает только один раз и на втором deploy завершается с `AlreadyExists`. `--dry-run=client -o yaml | kubectl apply -f -` формирует декларативный Secret и идемпотентно создаёт или обновляет его.
+
+4. `challenger` — последняя проверяемая версия, а `champion` — версия, прошедшая гейт и используемая production-сервисом. Алиас позволяет переключить модель без изменения конфигурации и образа; номер версии пришлось бы менять при каждом выпуске. Откат алиаса меняет модель после restart pod, а `rollout undo` возвращает весь предыдущий шаблон Deployment и образ кода.
+
+5. Если `champion` ещё не существует, приложение упадёт при startup на запросе к Registry. В k9s будет `CrashLoopBackOff`, readiness останется false; CI остановится на `kubectl rollout status`, а `--previous`-лог покажет `Registered Model` или alias not found.
+
+6. Браузер идёт на host port 80, проброшенный kind в node port 30080, затем в Traefik, по Ingress — в Service MLflow:5000 и pod MLflow:5000. `allowed-hosts` разрешает нужный Host header, а `cors-allowed-origins` разрешает браузерные запросы UI с `http://mlflow.localhost`. Проброс порта задаётся при создании node-контейнера kind; существующему контейнеру Docker нельзя добавить port mapping.
+
+7. При 10 пользователях перед последним масштабированием было 5 реплик и 111% CPU при цели 60%: `ceil(5 × 111 / 60) = 10`, но `maxReplicas=6`, поэтому HPA выставил 6 — как и наблюдалось. Вверх контроллер реагировал за интервалы сбора метрик, вниз ждал около 5 минут 50 секунд из-за окна стабилизации, чтобы не дёргать реплики на коротких провалах.
+
+8. Git хранит код, `.dvc`-указатель с MD5 и конфигурацию remote; DVC storage хранит байты CSV. Для версии модели N нужно открыть её run в MLflow, взять `data_md5`, найти Git-коммит с таким MD5 в `.csv.dvc`, checkout этого указателя и выполнить `dvc pull`/`dvc checkout`. Полученный файл проверяется тем же MD5, поэтому восстанавливаются именно обучающие данные версии N.
+
+### 9. Журнал проблем ДЗ 3
+
+1. Новая реплика попала в CrashLoopBackOff после первого CI deploy. В kubectl logs --previous приложение завершалось на db.init() с `password authentication failed for user postgres`. Workflow обновил logp-secrets, но существующий PostgreSQL был ранее инициализирован с другим паролем: смена Secret не меняет пароль внутри уже созданной БД. Сравнение SHA-256 без вывода значений подтвердило несовпадение. GitHub Secret DB_PASSWORD синхронизирован с паролем работающего PostgreSQL, после чего повторный main-run успешно заменил обе реплики. Старые pod оставались Ready, поэтому сервис во время диагностики отвечал.
+
+
+---
+
 ## Отчёт по ДЗ 2: CI/CD
 
 ### Чекпоинты
