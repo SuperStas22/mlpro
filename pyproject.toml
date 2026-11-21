@@ -13,6 +13,9 @@ dependencies = [
     "scikit-learn==1.6.1",
     "joblib",
     "psycopg[binary]",
+    "mlflow==3.16.1",
+    "matplotlib>=3.11.2",
+    "skops>=0.16.0",
 ]
 
 [dependency-groups]
@@ -23,6 +26,7 @@ dev = [
     "locust",
     "ruff",
     "ipykernel",
+    "dvc>=3.67.1",
 ]
 
 [build-system]

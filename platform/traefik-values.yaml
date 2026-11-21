@@ -1,0 +1,15 @@
+# Traefik принимает HTTP на NodePort 30080, куда kind направляет localhost:80.
+service:
+  spec:
+    type: NodePort
+
+ports:
+  web:
+    nodePort: 30080
+  # HTTPS в этой учебной конфигурации не используется.
+  websecure:
+    expose: {default: false}
+
+ingressClass:
+  name: traefik
+  isDefaultClass: true

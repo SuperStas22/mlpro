@@ -2,6 +2,7 @@ name: ci
 on:
   push: {branches: [main]}
   pull_request:
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -54,9 +55,13 @@ jobs:
   deploy:
     needs: build
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    # Только локальный runner находится в Docker-сети kind и видит постоянный кластер.
+    runs-on: [self-hosted, kind]
+    concurrency: {group: deploy-kind}
     timeout-minutes: 10
     permissions: {contents: read, packages: read}
+    env:
+      KIND_CLUSTER: logp
 
     steps:
       - uses: actions/checkout@v7
@@ -67,14 +72,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create kind cluster
-        uses: helm/kind-action@v1
-        with:
-          cluster_name: logp
+
+      - name: Connect runner to kind
+        run: |
+          BIN="$HOME/.local/bin"
+          mkdir -p "$BIN"
+          echo "$BIN" >> "$GITHUB_PATH"
+          test -x "$BIN/kind" || curl -sSLo "$BIN/kind" https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
+          test -x "$BIN/kubectl" || curl -sSLo "$BIN/kubectl" https://dl.k8s.io/v1.37.0/bin/linux/amd64/kubectl
+          chmod +x "$BIN/kind" "$BIN/kubectl"
+          "$BIN/kind" export kubeconfig --name "$KIND_CLUSTER" --internal
+          "$BIN/kubectl" get nodes
+
       - name: Load image into kind
         run: |
           docker pull "$IMAGE"
-          kind load docker-image "$IMAGE" --name logp
+          kind load docker-image "$IMAGE" --name "$KIND_CLUSTER"
+
       - name: Create application secret
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
@@ -82,7 +96,9 @@ jobs:
           test -n "$DB_PASSWORD"
           kubectl create secret generic logp-secrets \
             --from-literal=POSTGRES_PASSWORD="$DB_PASSWORD" \
-            --from-literal=DATABASE_URL="postgresql://postgres:$DB_PASSWORD@postgres:5432/logp"
+            --from-literal=DATABASE_URL="postgresql://postgres:$DB_PASSWORD@postgres:5432/logp" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy PostgreSQL
         run: |
           kubectl apply -f k8s/postgres.yaml
@@ -92,19 +108,24 @@ jobs:
           kubectl apply -f k8s/configmap.yaml -f k8s/service.yaml -f k8s/deployment.yaml
           kubectl set image deployment/logp-service api="$IMAGE"
           kubectl rollout status deployment/logp-service --timeout=180s
+
       - name: Smoke test
         run: |
-          kubectl port-forward service/logp-service 8080:80 > /tmp/port-forward.log 2>&1 &
+          # Runner находится в сети kind: обращаемся к NodePort Traefik с нужным Host.
+          URL="http://$KIND_CLUSTER-control-plane:30080"
+          HOST="Host: logp.localhost"
 
           curl --fail --silent --show-error --retry 10 --retry-all-errors \
-            http://localhost:8080/health | tee /tmp/health.json
-          python3 -c "import json; r=json.load(open('/tmp/health.json')); assert r['log_level'] == 'INFO', r"
+            -H "$HOST" "$URL/health" | tee /tmp/health.json
+          grep -Eq '"model_version":"logp-model-v[0-9]+"' /tmp/health.json
+          grep -q '"log_level":"INFO"' /tmp/health.json
 
-          curl --fail --silent --show-error -X POST http://localhost:8080/v1/predict \
+          curl --fail --silent --show-error -X POST -H "$HOST" "$URL/v1/predict" \
             -H "Content-Type: application/json" -d @good.json | tee /tmp/prediction.json
-          python3 -c "import json; r=json.load(open('/tmp/prediction.json')); assert -10 <= r['logp'] <= 15, r; assert isinstance(r['lipinski_ok'], bool), r"
+          jq -e '.logp >= -10 and .logp <= 15 and (.lipinski_ok | type == "boolean")' \
+            /tmp/prediction.json >/dev/null
 
-          REQUEST_ID=$(python3 -c "import json; print(json.load(open('/tmp/prediction.json'))['request_id'])")
+          REQUEST_ID=$(jq -r .request_id /tmp/prediction.json)
           # BackgroundTask пишет лог после ответа, поэтому ждём только свою строку не более 20 секунд.
           LOG_FOUND=0
           for ATTEMPT in $(seq 1 20); do
@@ -125,4 +146,4 @@ jobs:
           kubectl logs deployment/postgres --all-containers --tail=100 || true
           kubectl logs deployment/logp-service --all-containers --tail=100 || true
           kubectl logs deployment/logp-service --all-containers --previous --tail=100 || true
-          cat /tmp/port-forward.log 2>/dev/null || true
+          kubectl get ingress -A || true
