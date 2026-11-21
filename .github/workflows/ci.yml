@@ -61,7 +61,7 @@ jobs:
     timeout-minutes: 10
     permissions: {contents: read, packages: read}
     env:
-      KIND_CLUSTER: logp
+      KIND_CLUSTER: logp-missing
 
     steps:
       - uses: actions/checkout@v7
