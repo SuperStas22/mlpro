@@ -2,7 +2,6 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-import joblib
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -13,6 +12,7 @@ from starlette.background import BackgroundTask
 
 from logp import db
 from logp.config import settings
+from logp.model_store import load_model
 
 PREDICT_PATH = "/v1/predict"
 
@@ -95,10 +95,8 @@ class BatchPrediction(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    bundle = joblib.load(settings.model_path)
-    app.state.pipeline = bundle["pipeline"]
-    app.state.meta = bundle["metadata"]
-    app.state.version = bundle["metadata"]["model_version"]
+    # В Kubernetes это champion из MLflow, а в тестах — локальный joblib fallback.
+    app.state.pipeline, app.state.meta, app.state.version = load_model()
 
     db.init()
     yield
