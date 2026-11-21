@@ -117,6 +117,7 @@ jobs:
           HOST="Host: logp.localhost"
 
           curl --fail --silent --show-error --retry 10 --retry-all-errors \
+            --retry-delay 1 --retry-max-time 30 \
             -H "$HOST" "$URL/health" | tee /tmp/health.json
           grep -Eq '"model_version":"logp-model-v[0-9]+"' /tmp/health.json
           grep -q '"log_level":"INFO"' /tmp/health.json

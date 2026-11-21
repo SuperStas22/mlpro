@@ -23,7 +23,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: logp-broken.localhost
+    - host: logp.localhost
       http:
         paths:
           - path: /
