@@ -8,7 +8,7 @@
 | Две версии обучающих данных в DVC | [коммит v1 `c6a94af`](https://github.com/SuperStas22/mlpro/commit/c6a94af), [коммит v2 `8723668`](https://github.com/SuperStas22/mlpro/commit/8723668), [`data/logP-14000.csv.dvc`](data/logP-14000.csv.dvc), [MD5 v1](docs/screens/hw3-data-md5-v1.jpg), [MD5 v2](docs/screens/hw3-data-md5-v2.jpg) |
 | Обучение, эксперименты и MAE-гейт | [`src/logp/train.py`](src/logp/train.py), [коммит `3e5c815`](https://github.com/SuperStas22/mlpro/commit/3e5c815), [прогоны MLflow](docs/screens/hw3-mlflow-runs.jpg) |
 | Загрузка `champion` из Registry | [`src/logp/model_store.py`](src/logp/model_store.py), [`tests/test_model_store.py`](tests/test_model_store.py), [Registry](docs/screens/hw3-model-registry.jpg) |
-| CI/CD в локальный kind | [финальный зелёный run `44934815516`](https://github.com/SuperStas22/mlpro/actions/runs/44934815516), [скриншот](docs/screens/hw3-ci-success.png), [workflow](.github/workflows/ci.yml) |
+| CI/CD в локальный kind | [финальный зелёный run `44935762441`](https://github.com/SuperStas22/mlpro/actions/runs/44935762441), [runner](docs/screens/hw3-runner.png), [скриншот CI](docs/screens/hw3-ci-success.png), [workflow](.github/workflows/ci.yml) |
 | HPA и три нагрузочных прогона | [`k8s/hpa.yaml`](k8s/hpa.yaml), [`docs/hpa-results.md`](docs/hpa-results.md) |
 
 ### 1. Локальная MLOps-платформа
@@ -77,6 +77,8 @@ Endpoint `/health` показывает фактически загруженн�
 
 После tests job build публикует неизменяемый образ. Job deploy выполняется на self-hosted runner с меткой kind, потому что только он имеет доступ к локальному Docker daemon и кластеру kind.
 
+![Self-hosted runner с меткой kind](docs/screens/hw3-runner.png)
+
 Deploy:
 
 1. экспортирует kubeconfig существующего кластера
@@ -86,7 +88,7 @@ Deploy:
 5. ждёт rollout двух реплик
 6. проверяет `/health`, контракт `/v1/predict` и появление строки именно этого запроса в PostgreSQL.
 
-Запись лога выполняется через BackgroundTask, поэтому smoke использует ограниченный polling до 20 секунд, а не фиксированный `sleep`. Финальный run [`44934815516`](https://github.com/SuperStas22/mlpro/actions/runs/44934815516) завершил `tests`, `build`, `deploy` и smoke test успешно.
+Запись лога выполняется через BackgroundTask, поэтому smoke использует ограниченный polling до 20 секунд, а не фиксированный `sleep`. Финальный run [`44935762441`](https://github.com/SuperStas22/mlpro/actions/runs/44935762441) завершил `tests`, `build`, `deploy` и smoke test успешно.
 
 ![Зелёный CI/CD ДЗ 3](docs/screens/hw3-ci-success.png)
 
