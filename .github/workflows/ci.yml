@@ -105,9 +105,17 @@ jobs:
           python3 -c "import json; r=json.load(open('/tmp/prediction.json')); assert -10 <= r['logp'] <= 15, r; assert isinstance(r['lipinski_ok'], bool), r"
 
           REQUEST_ID=$(python3 -c "import json; print(json.load(open('/tmp/prediction.json'))['request_id'])")
-          sleep 2
-          kubectl exec deployment/postgres -- psql -U postgres -d logp -tAc \
-            "SELECT count(*) FROM predictions WHERE request_id = '$REQUEST_ID' AND status_code = 200" | grep -qx 1
+          # BackgroundTask пишет лог после ответа, поэтому ждём только свою строку не более 20 секунд.
+          LOG_FOUND=0
+          for ATTEMPT in $(seq 1 20); do
+            if kubectl exec deployment/postgres -- psql -U postgres -d logp -tAc \
+              "SELECT count(*) FROM predictions WHERE request_id = '$REQUEST_ID' AND status_code = 200" | grep -qx 1; then
+              LOG_FOUND=1
+              break
+            fi
+            sleep 1
+          done
+          test "$LOG_FOUND" -eq 1
       - name: Diagnostics
         if: failure()
         run: |

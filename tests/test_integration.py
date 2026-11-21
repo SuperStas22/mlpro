@@ -17,7 +17,8 @@ def logged(request_id):
     # Читаем именно строку текущего запроса, не полагаясь на порядок записей.
     with psycopg.connect(DATABASE_URL) as conn:
         return conn.execute(
-            "SELECT model_version, prediction, status_code, features->>'MolWt' FROM predictions WHERE request_id = %s",
+            "SELECT model_version, prediction, status_code, features->>'MolWt', features->>'NumHDonors' "
+            "FROM predictions WHERE request_id = %s",
             (request_id,),
         ).fetchone()
 
@@ -35,7 +36,7 @@ def test_prediction_is_logged(client, good_row):
 
 
 def test_garbage_is_logged_with_422(client, good_row):
-    # Ошибка схемы тоже является запросом: сохраняем её с prediction = NULL.
+    # Ошибка схемы тоже является запросом: сохраняем исходное тело с prediction = NULL.
     r = client.post("/v1/predict", json={**good_row, "NumHDonors": "много"})
     assert r.status_code == 422
     row = logged(r.json()["request_id"])
@@ -43,6 +44,8 @@ def test_garbage_is_logged_with_422(client, good_row):
     assert row is not None
     assert row[1] is None
     assert row[2] == 422
+    # Так тест подтверждает, что обработчик записал тело клиента, а не пустой объект.
+    assert row[4] == "много"
 
 
 def test_prediction_failure_is_logged_with_500(client, good_row, monkeypatch):
