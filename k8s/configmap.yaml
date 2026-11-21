@@ -8,7 +8,7 @@ data:
   LOG_LEVEL: "INFO"
   # Наличие MODEL_NAME включает загрузку модели из Registry вместо joblib-файла.
   MODEL_NAME: logp-model
-  MODEL_ALIAS: prod
+  MODEL_ALIAS: champion
   # Внутри Kubernetes обращаемся напрямую к Service MLflow, без внешнего Ingress.
   MLFLOW_TRACKING_URI: http://mlflow.mlops:5000
   MODEL_PATH: artifact/model.joblib
